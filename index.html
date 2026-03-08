@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>MineClone</title>
+<title>VoxForge</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#000;overflow:hidden;font-family:'Courier New',monospace}
@@ -27,9 +27,16 @@ canvas#c{display:block;width:100vw;height:100vh}
 #startBtn{margin-top:22px;padding:12px 42px;font-size:19px;background:#5dba2f;color:#0d2200;border:none;cursor:pointer;font-family:'Courier New',monospace;font-weight:900;letter-spacing:2px;text-transform:uppercase;border-bottom:5px solid #276000;border-right:3px solid #276000}
 #startBtn:hover{filter:brightness(1.12)}
 #startBtn:active{transform:translateY(2px);border-bottom-width:3px}
+#loadWorldBtn{margin-top:10px;padding:8px 28px;font-size:14px;background:#2a6090;color:#fff;border:none;cursor:pointer;font-family:'Courier New',monospace;font-weight:900;letter-spacing:1px;border-bottom:3px solid #0d3050;display:none}
+#loadWorldBtn:hover{filter:brightness(1.2)}
 #pause{position:fixed;inset:0;background:rgba(0,0,0,0.6);display:none;flex-direction:column;align-items:center;justify-content:center;z-index:100;color:#fff}
 #pause h2{font-size:38px;letter-spacing:5px;margin-bottom:20px}
-#resumeBtn{padding:10px 30px;font-size:17px;background:#5dba2f;color:#0d2200;border:none;cursor:pointer;font-family:'Courier New',monospace;font-weight:900;border-bottom:4px solid #276000}
+#resumeBtn{padding:10px 30px;font-size:17px;background:#5dba2f;color:#0d2200;border:none;cursor:pointer;font-family:'Courier New',monospace;font-weight:900;border-bottom:4px solid #276000;margin-bottom:12px}
+.savebtn{padding:8px 18px;font-size:13px;background:#2a6090;color:#fff;border:none;cursor:pointer;font-family:'Courier New',monospace;font-weight:900;border-bottom:3px solid #0d3050;letter-spacing:1px}
+.savebtn:hover{filter:brightness(1.2)}
+.savebtn.danger{background:#c03030;border-bottom-color:#800}
+#saveMsg{color:#8f8;font-size:12px;margin-top:12px;min-height:16px;letter-spacing:1px}
+#autosave{position:fixed;top:8px;right:8px;color:#8f8;font-size:11px;z-index:10;text-shadow:1px 1px 0 #000;opacity:0;transition:opacity 0.5s}
 #dmg{position:fixed;inset:0;pointer-events:none;z-index:50;border:6px solid transparent;transition:border-color 0.1s}
 #dmg.flash{border-color:rgba(255,0,0,0.55)}
 #breakprogress{position:fixed;bottom:140px;left:50%;transform:translateX(-50%);width:120px;height:6px;background:rgba(0,0,0,0.5);border:1px solid #555;border-radius:3px;z-index:10;display:none}
@@ -52,38 +59,50 @@ canvas#c{display:block;width:100vw;height:100vh}
 <div id="info"></div>
 <div id="dmg"></div>
 <div id="underwater"></div>
+<div id="autosave">💾 Saved!</div>
 <div id="breakprogress"><div id="breakbar"></div></div>
 <div id="toast"></div>
 
 <div id="overlay">
-  <h1>MINECLONE</h1>
+  <h1>VOXFORGE</h1>
   <p class="sub">A world worth exploring</p>
   <div class="ctrl">
     <b>WASD</b> Move &nbsp;·&nbsp; <b>SPACE</b> Jump &nbsp;·&nbsp; <b>SHIFT</b> Sprint<br>
     <b>LMB</b> Hold to Break &nbsp;·&nbsp; <b>RMB</b> Place &nbsp;·&nbsp; <b>Scroll/1-8</b> Select<br>
-    <b>F</b> Fly mode &nbsp;·&nbsp; <b>ESC</b> Pause &nbsp;·&nbsp; <b>Q</b> Drop item (eat)<br>
-    <b>R</b> Respawn &nbsp;·&nbsp; <b>Tab</b> Toggle debug info
+    <b>F</b> Fly mode &nbsp;·&nbsp; <b>ESC</b> Pause &nbsp;·&nbsp; <b>Q</b> Eat food<br>
+    <b>R</b> Respawn &nbsp;·&nbsp; <b>Tab</b> Toggle debug &nbsp;·&nbsp; <b>Ctrl+S</b> Save
   </div>
-  <button id="startBtn" onclick="startGame()">▶ PLAY</button>
+  <button id="startBtn" onclick="startGame()">▶ NEW WORLD</button>
+  <button id="loadWorldBtn" onclick="loadAndStart()">📂 CONTINUE</button>
 </div>
+
 <div id="pause">
   <h2>PAUSED</h2>
   <button id="resumeBtn" onclick="resumeGame()">▶ RESUME</button>
+  <div style="display:flex;gap:8px">
+    <button class="savebtn" onclick="saveGame()">💾 SAVE</button>
+    <button class="savebtn" onclick="loadGame()">📂 LOAD</button>
+    <button class="savebtn danger" onclick="newGame()">🗑 NEW WORLD</button>
+  </div>
+  <p id="saveMsg"></p>
 </div>
+
 <div id="dead">
   <h2>YOU DIED</h2>
   <p style="color:#ccc;margin-bottom:20px;font-size:14px">Score: <span id="deathScore">0</span> blocks placed/broken</p>
   <button id="respawnBtn" onclick="respawn()">▶ RESPAWN</button>
 </div>
 
-<!-- Three.js must load before ES modules since modules reference THREE as a global -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script type="module" src="src/main.js"></script>
-<!-- Shim: HTML onclick handlers need these on window before the module finishes loading -->
 <script>
-  function startGame()  { window._startGame  && window._startGame();  }
-  function resumeGame() { window._resumeGame && window._resumeGame(); }
-  function respawn()    { window._respawn    && window._respawn();    }
+  function startGame()    { window._startGame    && window._startGame();    }
+  function loadAndStart() { window._loadAndStart && window._loadAndStart(); }
+  function resumeGame()   { window._resumeGame   && window._resumeGame();   }
+  function respawn()      { window._respawn      && window._respawn();      }
+  function saveGame()     { window._saveGame     && window._saveGame();     }
+  function loadGame()     { window._loadGame     && window._loadGame();     }
+  function newGame()      { window._newGame      && window._newGame();      }
 </script>
 </body>
 </html>

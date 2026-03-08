@@ -4,7 +4,8 @@
 //  The progress bar fills over time; release resets it.
 // ════════════════════════════════════════════════════════════════
 
-import { gB, sB, BD } from '../world/world.js';
+import { gB, sB } from '../world/world.js';
+import { BD } from '../world/blocks.js';
 import { PL } from '../player/physics.js';
 import { buildBars } from '../ui/hud.js';
 

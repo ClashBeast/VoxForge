@@ -57,3 +57,29 @@ export function markChunkDirty(cx, cz) {
 }
 
 export function markAllDirty() { chunkDirty.fill(1); }
+
+// ── Save / Load ──────────────────────────────────────────────────
+const SAVE_KEY = 'voxforge_world_v1';
+
+export function saveWorld() {
+  try {
+    let binary = '';
+    for (let i = 0; i < wdata.length; i++) binary += String.fromCharCode(wdata[i]);
+    localStorage.setItem(SAVE_KEY, btoa(binary));
+    return true;
+  } catch(e) { console.error('Save failed:', e); return false; }
+}
+
+export function loadWorld() {
+  try {
+    const b64 = localStorage.getItem(SAVE_KEY);
+    if (!b64) return false;
+    const binary = atob(b64);
+    for (let i = 0; i < wdata.length; i++) wdata[i] = binary.charCodeAt(i);
+    markAllDirty();
+    return true;
+  } catch(e) { console.error('Load failed:', e); return false; }
+}
+
+export function hasSave()    { return !!localStorage.getItem(SAVE_KEY); }
+export function deleteSave() { localStorage.removeItem(SAVE_KEY); }

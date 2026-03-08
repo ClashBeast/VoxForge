@@ -79,5 +79,11 @@ canvas#c{display:block;width:100vw;height:100vh}
 <!-- Three.js must load before ES modules since modules reference THREE as a global -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script type="module" src="src/main.js"></script>
+<!-- Shim: HTML onclick handlers need these on window before the module finishes loading -->
+<script>
+  function startGame()  { window._startGame  && window._startGame();  }
+  function resumeGame() { window._resumeGame && window._resumeGame(); }
+  function respawn()    { window._respawn    && window._respawn();    }
+</script>
 </body>
 </html>

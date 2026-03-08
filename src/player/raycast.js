@@ -10,7 +10,8 @@
 
 /* global THREE */
 
-import { gB, BD } from '../world/world.js';
+import { gB } from '../world/world.js';
+import { BD } from '../world/blocks.js';
 import { eyePos } from './physics.js';
 import { PL } from './physics.js';
 

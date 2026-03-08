@@ -97,7 +97,7 @@ function loop(t) {
 }
 
 // ── UI button handlers (called from HTML onclick) ─────────────────
-window.startGame = function () {
+window._startGame = function () {
   document.getElementById('overlay').style.display = 'none';
   setStarted(true);
   document.body.requestPointerLock();
@@ -105,7 +105,7 @@ window.startGame = function () {
   requestAnimationFrame(loop);
 };
 
-window.resumeGame = function () {
+window._resumeGame = function () {
   import('./player/input.js').then(m => {
     m.setPaused(false);
     document.getElementById('pause').style.display = 'none';
@@ -113,6 +113,6 @@ window.resumeGame = function () {
   });
 };
 
-window.respawn = function () {
+window._respawn = function () {
   import('./ui/hud.js').then(m => m.respawn());
 };

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MineClone</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;overflow:hidden;font-family:'Courier New',monospace}
+canvas#c{display:block;width:100vw;height:100vh}
+#crosshair{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:10}
+#crosshair::before,#crosshair::after{content:'';position:absolute;background:rgba(255,255,255,0.85);box-shadow:0 0 3px rgba(0,0,0,1)}
+#crosshair::before{width:2px;height:22px;left:-1px;top:-11px}
+#crosshair::after{width:22px;height:2px;top:-1px;left:-11px}
+#hud{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);display:flex;gap:3px;z-index:10}
+.slot{width:48px;height:48px;border:2px solid #666;background:rgba(0,0,0,0.5);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;position:relative}
+.slot.active{border:3px solid #fff;box-shadow:0 0 10px rgba(255,255,255,0.5)}
+.slot canvas{width:30px;height:30px;image-rendering:pixelated}
+.slot-num{position:absolute;bottom:1px;right:3px;color:#ccc;font-size:9px;text-shadow:1px 1px 0 #000}
+#bars{position:fixed;bottom:72px;left:50%;transform:translateX(-50%);display:flex;gap:2px;z-index:10}
+.heart,.food{width:18px;height:18px;font-size:14px;line-height:18px;text-align:center}
+#hotlabel{position:fixed;bottom:76px;left:50%;transform:translateX(-50%);color:#fff;font-size:12px;z-index:10;text-shadow:1px 1px 0 #000;letter-spacing:1px;pointer-events:none}
+#info{position:fixed;top:8px;left:8px;color:#fff;font-size:11px;z-index:10;text-shadow:1px 1px 0 #000;line-height:1.8;background:rgba(0,0,0,0.35);padding:6px 10px;border-radius:3px}
+#overlay{position:fixed;inset:0;background:rgba(0,0,0,0.85);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;color:#fff}
+#overlay h1{font-size:58px;letter-spacing:7px;color:#5dba2f;text-shadow:4px 4px 0 #1a4500;font-weight:900;margin-bottom:4px}
+#overlay .sub{font-size:14px;color:#aaa}
+#overlay .ctrl{font-size:13px;color:#888;margin-top:16px;line-height:2.2;text-align:center;background:rgba(255,255,255,0.04);padding:10px 22px;border-radius:4px}
+#startBtn{margin-top:22px;padding:12px 42px;font-size:19px;background:#5dba2f;color:#0d2200;border:none;cursor:pointer;font-family:'Courier New',monospace;font-weight:900;letter-spacing:2px;text-transform:uppercase;border-bottom:5px solid #276000;border-right:3px solid #276000}
+#startBtn:hover{filter:brightness(1.12)}
+#startBtn:active{transform:translateY(2px);border-bottom-width:3px}
+#pause{position:fixed;inset:0;background:rgba(0,0,0,0.6);display:none;flex-direction:column;align-items:center;justify-content:center;z-index:100;color:#fff}
+#pause h2{font-size:38px;letter-spacing:5px;margin-bottom:20px}
+#resumeBtn{padding:10px 30px;font-size:17px;background:#5dba2f;color:#0d2200;border:none;cursor:pointer;font-family:'Courier New',monospace;font-weight:900;border-bottom:4px solid #276000}
+#dmg{position:fixed;inset:0;pointer-events:none;z-index:50;border:6px solid transparent;transition:border-color 0.1s}
+#dmg.flash{border-color:rgba(255,0,0,0.55)}
+#breakprogress{position:fixed;bottom:140px;left:50%;transform:translateX(-50%);width:120px;height:6px;background:rgba(0,0,0,0.5);border:1px solid #555;border-radius:3px;z-index:10;display:none}
+#breakbar{height:100%;width:0%;background:#e8c030;border-radius:2px;transition:width 0.05s linear}
+#underwater{position:fixed;inset:0;pointer-events:none;z-index:5;background:rgba(20,60,150,0.35);display:none}
+#dead{position:fixed;inset:0;background:rgba(80,0,0,0.75);display:none;flex-direction:column;align-items:center;justify-content:center;z-index:110;color:#fff}
+#dead h2{font-size:42px;letter-spacing:4px;color:#ff4444;text-shadow:3px 3px 0 #400;margin-bottom:16px}
+#respawnBtn{padding:10px 28px;font-size:16px;background:#c03030;color:#fff;border:none;cursor:pointer;font-family:'Courier New',monospace;font-weight:900;border-bottom:4px solid #800;letter-spacing:2px}
+#respawnBtn:hover{filter:brightness(1.2)}
+#toast{position:fixed;top:50px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.7);color:#fff;padding:6px 18px;border-radius:4px;font-size:13px;z-index:200;pointer-events:none;opacity:0;transition:opacity 0.3s}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="crosshair"></div>
+<div id="hud"></div>
+<div id="hotlabel"></div>
+<div id="bars"></div>
+<div id="info"></div>
+<div id="dmg"></div>
+<div id="underwater"></div>
+<div id="breakprogress"><div id="breakbar"></div></div>
+<div id="toast"></div>
+
+<div id="overlay">
+  <h1>MINECLONE</h1>
+  <p class="sub">A world worth exploring</p>
+  <div class="ctrl">
+    <b>WASD</b> Move &nbsp;·&nbsp; <b>SPACE</b> Jump &nbsp;·&nbsp; <b>SHIFT</b> Sprint<br>
+    <b>LMB</b> Hold to Break &nbsp;·&nbsp; <b>RMB</b> Place &nbsp;·&nbsp; <b>Scroll/1-8</b> Select<br>
+    <b>F</b> Fly mode &nbsp;·&nbsp; <b>ESC</b> Pause &nbsp;·&nbsp; <b>Q</b> Drop item (eat)<br>
+    <b>R</b> Respawn &nbsp;·&nbsp; <b>Tab</b> Toggle debug info
+  </div>
+  <button id="startBtn" onclick="startGame()">▶ PLAY</button>
+</div>
+<div id="pause">
+  <h2>PAUSED</h2>
+  <button id="resumeBtn" onclick="resumeGame()">▶ RESUME</button>
+</div>
+<div id="dead">
+  <h2>YOU DIED</h2>
+  <p style="color:#ccc;margin-bottom:20px;font-size:14px">Score: <span id="deathScore">0</span> blocks placed/broken</p>
+  <button id="respawnBtn" onclick="respawn()">▶ RESPAWN</button>
+</div>
+
+<!-- Three.js must load before ES modules since modules reference THREE as a global -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

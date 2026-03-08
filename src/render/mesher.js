@@ -10,7 +10,8 @@
 
 /* global THREE */
 
-import { WSIZ, WMAXH, CHUNK, CX, CZ, gB, BD, chunkDirty, chunkIdx } from '../world/world.js';
+import { WSIZ, WMAXH, CHUNK, CX, CZ, gB, chunkDirty, chunkIdx } from '../world/world.js';
+import { BD } from '../world/blocks.js';
 import { bMats } from './textures.js';
 
 let scene = null;

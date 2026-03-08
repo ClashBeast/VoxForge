@@ -52,21 +52,30 @@ function flashAutosave() {
 }
 
 // ── Game loop ─────────────────────────────────────────────────────
-let prevT = 0;
+let prevT         = 0;
 let autoSaveTimer = 0;
+let physicsAccum  = 0;
+const PHYS_STEP   = 1 / 60; // fixed 60hz physics tick
 
 function loop(t) {
   requestAnimationFrame(loop);
-  const dt = Math.min((t - prevT) / 1000, 0.05);
+  // Clamp to 0.1 so a tab switch doesn't cause a massive spike
+  const rawDt = Math.min((t - prevT) / 1000, 0.1);
   prevT = t;
   if (isPaused() || dead) return;
 
-  const newJump = updatePlayer(dt, keys, jumpPress);
-  if (newJump !== undefined) setJumpPress(newJump);
+  // Physics runs at fixed 60hz — jumping/movement/collision never affected by frame drops
+  physicsAccum += rawDt;
+  while (physicsAccum >= PHYS_STEP) {
+    const newJump = updatePlayer(PHYS_STEP, keys, jumpPress);
+    if (newJump !== undefined) setJumpPress(newJump);
+    physicsAccum -= PHYS_STEP;
+  }
 
-  updateDayNight(dt);
+  // These run at variable rate — safe, they don't affect physics feel
+  updateDayNight(rawDt);
   flushDirtyChunks();
-  setPlaceCD(placeCD - dt);
+  setPlaceCD(placeCD - rawDt);
 
   const ray = raycast();
   updateHighlight(ray ? ray.hit : null);
@@ -85,7 +94,7 @@ function loop(t) {
   }
 
   // Auto-save every 60 seconds
-  autoSaveTimer += dt;
+  autoSaveTimer += rawDt;
   if (autoSaveTimer >= 60) {
     autoSaveTimer = 0;
     saveWorld();

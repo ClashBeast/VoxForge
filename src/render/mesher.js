@@ -1,9 +1,13 @@
 // ════════════════════════════════════════════════════════════════
-//  CHUNK MESHER  –  Face-Only BufferGeometry + Vertex-Color AO
+//  CHUNK MESHER  –  Visible-Face-Only BufferGeometry
 //
-//  Only visible faces are emitted. Each face is a quad with
-//  per-corner AO (ambient occlusion) baked into vertex color.
-//  Result: 1–2 draw calls per chunk, 10–50× fewer triangles.
+//  Strategy: iterate every block, check all 6 neighbours.
+//  Only emit a face when the neighbour is air/transparent.
+//  Use Three.js PlaneGeometry positioned+rotated per face direction
+//  to avoid any manual quad math.
+//
+//  Result: 1 draw call per chunk (opaque) + 1 (transparent),
+//  zero buried faces, correct block colors, vertex AO.
 // ════════════════════════════════════════════════════════════════
 
 /* global THREE */
@@ -19,70 +23,77 @@ export const chunkMeshes = Array.from({length: CX}, () =>
 
 export function initMesher(sceneRef) { scene = sceneRef; }
 
+// ── Visibility check ─────────────────────────────────────────────
+function showFace(selfId, nx, ny, nz) {
+  const nb = gB(nx, ny, nz);
+  if (!nb || !BD[nb]) return true;          // air → show
+  if (BD[nb].opaque) return false;           // solid neighbour → hide
+  if (nb === selfId) return false;           // same transparent → hide
+  return true;
+}
+
 // ── AO ───────────────────────────────────────────────────────────
-function isSolid(x, y, z) {
+function solidAt(x, y, z) {
   if (y < 0 || y > WMAXH) return false;
   const b = gB(x, y, z);
   return b !== 0 && !!BD[b] && BD[b].opaque;
 }
-function aoCorner(e1, e2, c) {
-  const s1 = e1?1:0, s2 = e2?1:0, sc = c?1:0;
+function aoVal(s1, s2, sc) {
   if (s1 && s2) return 0.50;
-  return 1.0 - (s1 + s2 + sc) * 0.15;
+  return 1.0 - ((s1?1:0) + (s2?1:0) + (sc?1:0)) * 0.15;
 }
 
-// ── Face table ───────────────────────────────────────────────────
-// origin : block-local offset to the quad's (u=0,v=0) corner
-//          (i.e. which corner of the unit cube the face starts at)
-// du/dv  : unit steps that sweep across the face
-// check  : neighbour offset to test visibility
-// colKey : 'top' | 'bot' | 'side'
-// aoN    : 4 corners × [edge1, edge2, diag] world-relative offsets
-const FACES = [
-  // +X right  (face on the x+1 side)
-  { norm:[ 1,0,0], origin:[1,0,0], du:[0,0,1], dv:[0,1,0], check:[ 1,0,0], colKey:'side',
-    aoN:[ [[ 1,-1, 0],[ 1, 0,-1],[ 1,-1,-1]],
-          [[ 1,-1, 1],[ 1, 0, 1],[ 1,-1, 1]],
-          [[ 1, 1, 1],[ 1, 0, 1],[ 1, 1, 1]],
-          [[ 1, 1, 0],[ 1, 0,-1],[ 1, 1,-1]] ] },
-  // -X left
-  { norm:[-1,0,0], origin:[0,0,1], du:[0,0,-1], dv:[0,1,0], check:[-1,0,0], colKey:'side',
-    aoN:[ [[-1,-1, 1],[-1, 0, 1],[-1,-1, 1]],
-          [[-1,-1, 0],[-1, 0,-1],[-1,-1,-1]],
-          [[-1, 1, 0],[-1, 0,-1],[-1, 1,-1]],
-          [[-1, 1, 1],[-1, 0, 1],[-1, 1, 1]] ] },
+// ── Face specs ───────────────────────────────────────────────────
+// Each face: which neighbour to check, the center offset of the
+// PlaneGeometry (0.5 units from block center), rotation in Euler,
+// which color key, and AO corner neighbour triples.
+//
+// Block center is at (x+0.5, y+0.5, z+0.5).
+// Face center = block center + faceOffset.
+
+const FACE_SPECS = [
   // +Y top
-  { norm:[0, 1,0], origin:[0,1,0], du:[1,0,0], dv:[0,0,1], check:[0, 1,0], colKey:'top',
-    aoN:[ [[-1, 1, 0],[ 0, 1,-1],[-1, 1,-1]],
-          [[ 1, 1, 0],[ 0, 1,-1],[ 1, 1,-1]],
-          [[ 1, 1, 1],[ 0, 1, 1],[ 1, 1, 1]],
-          [[-1, 1, 1],[ 0, 1, 1],[-1, 1, 1]] ] },
+  { dir:[0,1,0],  offset:[0, 0.5, 0],  rot:[-Math.PI/2, 0, 0],          colKey:'top',
+    ao:[[[-1,1,-1],[0,1,-1],[1,1,-1]], [[1,1,-1],[1,1,0],[1,1,1]],
+        [[1,1,1],[0,1,1],[-1,1,1]],   [[-1,1,1],[-1,1,0],[-1,1,-1]]] },
   // -Y bottom
-  { norm:[0,-1,0], origin:[0,0,1], du:[1,0,0], dv:[0,0,-1], check:[0,-1,0], colKey:'bot',
-    aoN:[ [[-1,-1, 1],[ 0,-1, 1],[-1,-1, 1]],
-          [[ 1,-1, 1],[ 0,-1, 1],[ 1,-1, 1]],
-          [[ 1,-1, 0],[ 0,-1,-1],[ 1,-1,-1]],
-          [[-1,-1, 0],[ 0,-1,-1],[-1,-1,-1]] ] },
+  { dir:[0,-1,0], offset:[0,-0.5, 0],  rot:[ Math.PI/2, 0, 0],          colKey:'bot',
+    ao:[[[-1,-1,1],[0,-1,1],[1,-1,1]], [[1,-1,1],[1,-1,0],[1,-1,-1]],
+        [[1,-1,-1],[0,-1,-1],[-1,-1,-1]],[[-1,-1,-1],[-1,-1,0],[-1,-1,1]]] },
+  // +X right
+  { dir:[1,0,0],  offset:[0.5, 0, 0],  rot:[0,-Math.PI/2, 0],           colKey:'side',
+    ao:[[[1,-1,-1],[1,0,-1],[1,-1,-1]], [[1,-1,1],[1,0,1],[1,-1,1]],
+        [[1,1,1],[1,0,1],[1,1,1]],      [[1,1,-1],[1,0,-1],[1,1,-1]]] },
+  // -X left
+  { dir:[-1,0,0], offset:[-0.5, 0, 0], rot:[0, Math.PI/2, 0],           colKey:'side',
+    ao:[[[-1,-1,1],[-1,0,1],[-1,-1,1]], [[-1,-1,-1],[-1,0,-1],[-1,-1,-1]],
+        [[-1,1,-1],[-1,0,-1],[-1,1,-1]], [[-1,1,1],[-1,0,1],[-1,1,1]]] },
   // +Z front
-  { norm:[0,0, 1], origin:[1,0,1], du:[-1,0,0], dv:[0,1,0], check:[0,0, 1], colKey:'side',
-    aoN:[ [[ 1,-1, 1],[ 0,-1, 1],[ 1,-1, 1]],
-          [[-1,-1, 1],[ 0,-1, 1],[-1,-1, 1]],
-          [[-1, 1, 1],[ 0, 1, 1],[-1, 1, 1]],
-          [[ 1, 1, 1],[ 0, 1, 1],[ 1, 1, 1]] ] },
+  { dir:[0,0,1],  offset:[0, 0, 0.5],  rot:[0, Math.PI, 0],             colKey:'side',
+    ao:[[[1,-1,1],[0,-1,1],[1,-1,1]], [[-1,-1,1],[0,-1,1],[-1,-1,1]],
+        [[-1,1,1],[0,1,1],[-1,1,1]],  [[1,1,1],[0,1,1],[1,1,1]]] },
   // -Z back
-  { norm:[0,0,-1], origin:[0,0,0], du:[1,0,0], dv:[0,1,0], check:[0,0,-1], colKey:'side',
-    aoN:[ [[-1,-1,-1],[ 0,-1,-1],[-1,-1,-1]],
-          [[ 1,-1,-1],[ 0,-1,-1],[ 1,-1,-1]],
-          [[ 1, 1,-1],[ 0, 1,-1],[ 1, 1,-1]],
-          [[-1, 1,-1],[ 0, 1,-1],[-1, 1,-1]] ] },
+  { dir:[0,0,-1], offset:[0, 0,-0.5],  rot:[0, 0, 0],                   colKey:'side',
+    ao:[[[-1,-1,-1],[0,-1,-1],[-1,-1,-1]], [[1,-1,-1],[0,-1,-1],[1,-1,-1]],
+        [[1,1,-1],[0,1,-1],[1,1,-1]],      [[-1,1,-1],[0,1,-1],[-1,1,-1]]] },
 ];
 
-// ── Build raw geometry buffers ───────────────────────────────────
+// ── Build geometry for one chunk ─────────────────────────────────
 function buildChunkGeom(cx, cz) {
   const x0 = cx * CHUNK, x1 = Math.min(x0 + CHUNK, WSIZ);
   const z0 = cz * CHUNK, z1 = Math.min(z0 + CHUNK, WSIZ);
-  const opq = { pos:[], nor:[], uv:[], col:[], idx:[] };
-  const trn = { pos:[], nor:[], uv:[], col:[], idx:[] };
+
+  // We'll merge all opaque faces into one geometry, transparent into another
+  const positions = { opq: [], trn: [] };
+  const normals   = { opq: [], trn: [] };
+  const colors    = { opq: [], trn: [] };
+  const indices   = { opq: [], trn: [] };
+
+  // Reusable plane geometry to sample face vertices from
+  const plane = new THREE.PlaneGeometry(1, 1);
+  const planePos = plane.attributes.position; // 4 verts
+
+  const dummy = new THREE.Object3D();
 
   for (let y = 0; y <= WMAXH; y++) {
     for (let z = z0; z < z1; z++) {
@@ -91,85 +102,88 @@ function buildChunkGeom(cx, cz) {
         if (!id || !BD[id]) continue;
         const def   = BD[id];
         const alpha = def.alpha || 1;
-        const buf   = def.opaque ? opq : trn;
+        const key   = def.opaque ? 'opq' : 'trn';
+        const pos   = positions[key];
+        const nor   = normals[key];
+        const col   = colors[key];
+        const idx   = indices[key];
 
-        for (let fi = 0; fi < 6; fi++) {
-          const f = FACES[fi];
-          const [ck0,ck1,ck2] = f.check;
-          const nb = gB(x+ck0, y+ck1, z+ck2);
+        for (const spec of FACE_SPECS) {
+          const [dx, dy, dz] = spec.dir;
+          if (!showFace(id, x+dx, y+dy, z+dz)) continue;
 
-          if (nb) {
-            const nd = BD[nb];
-            if (!nd) continue;
-            if (nd.opaque) continue;
-            if (nb === id) continue;
-            if (alpha < 1 && !nd.opaque) continue;
-          }
+          // Block color for this face
+          const [cr, cg, cb] = def[spec.colKey];
 
-          const [cr,cg,cb] = def[f.colKey];
-          const [o0,o1,o2] = f.origin;
-          const ox = x+o0, oy = y+o1, oz = z+o2;
-          const [du0,du1,du2] = f.du;
-          const [dv0,dv1,dv2] = f.dv;
-
-          // 4 corners of the face quad
-          const px = [ox,       ox+du0,       ox+du0+dv0, ox+dv0];
-          const py = [oy,       oy+du1,       oy+du1+dv1, oy+dv1];
-          const pz = [oz,       oz+du2,       oz+du2+dv2, oz+dv2];
-
-          const aoV = f.aoN.map(([e1,e2,c]) =>
-            aoCorner(
-              isSolid(x+e1[0], y+e1[1], z+e1[2]),
-              isSolid(x+e2[0], y+e2[1], z+e2[2]),
-              isSolid(x+ c[0], y+ c[1], z+ c[2])
-            )
+          // AO for 4 corners
+          const aoV = spec.ao.map(([a,b,c]) =>
+            aoVal(solidAt(x+a[0],y+a[1],z+a[2]),
+                  solidAt(x+b[0],y+b[1],z+b[2]),
+                  solidAt(x+c[0],y+c[1],z+c[2]))
           );
 
-          const base = buf.pos.length / 3;
-          const [nx,ny,nz] = f.norm;
+          // Position the plane at the correct face location
+          dummy.position.set(
+            x + 0.5 + spec.offset[0],
+            y + 0.5 + spec.offset[1],
+            z + 0.5 + spec.offset[2]
+          );
+          dummy.rotation.set(spec.rot[0], spec.rot[1], spec.rot[2]);
+          dummy.updateMatrix();
 
-          for (let ci = 0; ci < 4; ci++) {
-            buf.pos.push(px[ci], py[ci], pz[ci]);
-            buf.nor.push(nx, ny, nz);
-            buf.uv.push(ci===1||ci===2 ? 1 : 0, ci===2||ci===3 ? 1 : 0);
-            const a = aoV[ci];
-            buf.col.push((cr/255)*a, (cg/255)*a, (cb/255)*a);
+          const base = pos.length / 3;
+          const norm = spec.dir;
+
+          // PlaneGeometry has 4 vertices in this order:
+          // 0: (-0.5, 0.5), 1: (0.5, 0.5), 2: (-0.5,-0.5), 3: (0.5,-0.5)
+          // We want corners: TL, TR, BL, BR
+          // AO mapping: 0=BL, 1=BR, 2=TR, 3=TL (match our spec order)
+          const aoMap = [3, 2, 1, 0]; // plane vertex → ao corner index
+
+          for (let vi = 0; vi < 4; vi++) {
+            const v = new THREE.Vector3(
+              planePos.getX(vi),
+              planePos.getY(vi),
+              planePos.getZ(vi)
+            ).applyMatrix4(dummy.matrix);
+
+            pos.push(v.x, v.y, v.z);
+            nor.push(norm[0], norm[1], norm[2]);
+            const a = aoV[aoMap[vi]];
+            col.push((cr/255)*a, (cg/255)*a, (cb/255)*a);
           }
 
-          // Flip triangle diagonal to prevent AO dark-stripe artifact
-          if (aoV[0]+aoV[2] > aoV[1]+aoV[3]) {
-            buf.idx.push(base,base+1,base+2, base,base+2,base+3);
-          } else {
-            buf.idx.push(base+1,base+2,base+3, base,base+1,base+3);
-          }
+          // Two triangles: 0,2,1 and 2,3,1 (PlaneGeometry winding)
+          idx.push(base, base+2, base+1,  base+2, base+3, base+1);
         }
       }
     }
   }
-  return { opq, trn };
+
+  plane.dispose();
+  return { positions, normals, colors, indices };
 }
 
 // ── Arrays → BufferGeometry ──────────────────────────────────────
-function makeGeo(buf) {
-  if (buf.idx.length === 0) return null;
+function makeGeo(pos, nor, col, idx) {
+  if (idx.length === 0) return null;
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(buf.pos), 3));
-  geo.setAttribute('normal',   new THREE.BufferAttribute(new Float32Array(buf.nor), 3));
-  geo.setAttribute('uv',       new THREE.BufferAttribute(new Float32Array(buf.uv),  2));
-  geo.setAttribute('color',    new THREE.BufferAttribute(new Float32Array(buf.col), 3));
-  geo.setIndex(buf.idx.length > 65535
-    ? new THREE.BufferAttribute(new Uint32Array(buf.idx),  1)
-    : new THREE.BufferAttribute(new Uint16Array(buf.idx), 1));
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+  geo.setAttribute('normal',   new THREE.BufferAttribute(new Float32Array(nor), 3));
+  geo.setAttribute('color',    new THREE.BufferAttribute(new Float32Array(col), 3));
+  geo.setIndex(idx.length > 65535
+    ? new THREE.BufferAttribute(new Uint32Array(idx),  1)
+    : new THREE.BufferAttribute(new Uint16Array(idx), 1));
   geo.computeBoundingSphere();
   return geo;
 }
 
-// ── Shared materials ─────────────────────────────────────────────
+// ── Materials ────────────────────────────────────────────────────
 let _matO = null, _matT = null;
 const matOpaque = () => _matO || (_matO = new THREE.MeshLambertMaterial({ vertexColors: true }));
 const matTrans  = () => _matT || (_matT = new THREE.MeshLambertMaterial({
-  vertexColors: true, transparent: true, opacity: 0.72,
-  depthWrite: false, side: THREE.DoubleSide,
+  vertexColors: true, transparent: true,
+  opacity: 0.72, depthWrite: false, side: THREE.DoubleSide,
 }));
 
 // ── Rebuild one chunk ─────────────────────────────────────────────
@@ -178,22 +192,22 @@ export function rebuildChunk(cx, cz) {
   if (slot.opaque) { scene.remove(slot.opaque); slot.opaque.geometry.dispose(); slot.opaque = null; }
   if (slot.trans)  { scene.remove(slot.trans);  slot.trans.geometry.dispose();  slot.trans  = null; }
 
-  const { opq, trn } = buildChunkGeom(cx, cz);
-  const gO = makeGeo(opq);
+  const { positions, normals, colors, indices } = buildChunkGeom(cx, cz);
+
+  const gO = makeGeo(positions.opq, normals.opq, colors.opq, indices.opq);
   if (gO) { slot.opaque = new THREE.Mesh(gO, matOpaque()); slot.opaque.frustumCulled = true; scene.add(slot.opaque); }
-  const gT = makeGeo(trn);
+
+  const gT = makeGeo(positions.trn, normals.trn, colors.trn, indices.trn);
   if (gT) { slot.trans  = new THREE.Mesh(gT, matTrans());  slot.trans.frustumCulled  = true; scene.add(slot.trans);  }
 }
 
-// ── Flush dirty chunks (4 per frame) ────────────────────────────
+// ── Flush dirty chunks ───────────────────────────────────────────
 const REBUILD_PER_FRAME = 4;
 export function flushDirtyChunks() {
   let n = 0;
   for (let cz = 0; cz < CZ && n < REBUILD_PER_FRAME; cz++)
     for (let cx = 0; cx < CX && n < REBUILD_PER_FRAME; cx++)
       if (chunkDirty[chunkIdx(cx, cz)]) {
-        rebuildChunk(cx, cz);
-        chunkDirty[chunkIdx(cx, cz)] = 0;
-        n++;
+        rebuildChunk(cx, cz); chunkDirty[chunkIdx(cx, cz)] = 0; n++;
       }
 }
